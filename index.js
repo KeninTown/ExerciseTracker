@@ -6,128 +6,113 @@ const mongoose = require('mongoose');
 const User = require('./User.js') //модель User для MongoDB
 const Exercise = require('./Exercises.js');//занятия для каждого чела
 
-
+const PORT = process.env['PORT']
+const MONGO_URI = process.env['MONGO_URI']
 require('dotenv').config();
 
 app.use(cors());
 app.use(express.static('public'));
-app.use(bodyParser.urlencoded({extended:false})); //расшифровывать body у post req
+app.use(bodyParser.urlencoded({ extended: false }));
 
-//Подключение MongoDB
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+//Connecting to MongoDB
+mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => console.log('Connected'))
   .catch((err) => console.log(err));
 
-//отправляем стартовую страницу
+//send start page
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html');
 });
 
-//645795380a02f48d6a70df34
-
+//create new user
 app.post('/api/users', async (req, res) => {
   const user = new User({
-    name: req.body.username
+    username: req.body.username
   });
-  try{
+  try {
     let savedUser = await user.save();
-    res.json({username: savedUser.name, _id: savedUser._id});
+    res.json({ username: savedUser.username, _id: savedUser._id });
   }
-  catch(err){
+  catch (err) {
     console.log(err);
   }
 });
 
+//send all users
 app.get('/api/users', async (req, res) => {
-  try{
-    let users = await User.find({});
+  try {
+    let users = await User.find({}).select('_id username');
     res.send(users);
   }
-  catch(err){
+  catch (err) {
     console.log(err);
   }
 });
 
+//create new exercise
 app.post('/api/users/:_id/exercises', async (req, res) => {
-  try{
-    // const user = await User.findByIdAndUpdate(userId, {$push: {exercises: {
-    //   duration: req.body.duration,
-    //   description: req.body.description,
-    //   date: new Date(req.body.date).toDateString()
-    // }}});
-//     const reqDuration = Number(req.body.duration);
-//     const reqDescription = req.body.description;
-//     const reqDate = new Date(req.body.date).toDateString();
-
-//     const user = await User.findByIdAndUpdate(userId, {$push: {exercises:{ 
-//       $each: [{
-//         duration: req.body.duration,
-//         description: req.body.description,
-//         date: new Date(req.body.date).toDateString()
-//     }]
-//     }
-// }}, {new: true})
-
-    // const user = await User.findById(userId);
-    // user.exercises.push({
-    //     duration: reqDuration,
-    //     description: reqDescription,
-    //     date: reqDate
-    // });
-    // console.log(user);
+  try {
     const userIdParams = req.params._id;
+    let dateBody = req.body.date ? new Date(req.body.date) : new Date();
     const exercise = new Exercise({
       userId: userIdParams,
       duration: req.body.duration,
       description: req.body.description,
-      date: req.body.date ? new Date(req.body.date).toDateString() : new Date().toDateString() 
+      date: dateBody.toDateString(),
+      unixDate: dateBody.getTime()
     })
     const savedExercise = await exercise.save();
     const user = await User.findById(userIdParams);
     res.json({
-      _id:userIdParams, 
-      username: user.name,
+      _id: userIdParams,
+      username: user.username,
       duration: savedExercise.duration,
       description: savedExercise.description,
       date: savedExercise.date
     });
   }
-  catch(err){
+  catch (err) {
     console.log(err);
   }
 });
 
-
-async function as(){
-  let user = await User.deleteMany({});
-  console.log(user);
-}
-
+//send JSON with information about user with id
 app.get('/api/users/:id/logs', async (req, res) => {
-  try{  
-    const user = await User.findById(req.params.id);
-    let queryUserExercises = Exercise.find({userId: req.params.id}).select('-_id -__v -userId');
+  try {
+    const userIdParams = req.params.id;
+    const user = await User.findById(userIdParams);
+    let queryUserExercises = Exercise.find({ userId: req.params.id });
+
+    if (req.query.from && req.query.to) {
+      const from = new Date(req.query.from).getTime();
+      const to = new Date(req.query.to).getTime();
+      queryUserExercises = Exercise.find({
+        $and: [
+          { userId: userIdParams },
+          { unixDate: { $gt: from, $lt: to } }
+        ]
+      });
+    }
+
+    if (req.query.limit)
+      queryUserExercises.limit(Number(req.query.limit));
+
+    queryUserExercises.select('description duration date -_id');
     const userExercises = await queryUserExercises.exec();
-    if(user)
-    {
-      res.json({
-        _id: user._id,
-        username: user.name,
-        count: userExercises.length,
-        log: userExercises
-      })
-    }
-    else{
-      res.json({error: 'Wrong user id'})
-    }
+
+    res.json({
+      _id: user._id,
+      username: user.username,
+      count: userExercises.length,
+      log: userExercises
+    });
   }
-  catch(err){
+  catch (err) {
     console.log(err);
   }
 })
 
 //прослушиваем порт
-const listener = app.listen(process.env.PORT, () => {
+const listener = app.listen(PORT, () => {
   console.log('Your app is listening on port ' + listener.address().port)
 })
-
